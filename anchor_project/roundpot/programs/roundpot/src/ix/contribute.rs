@@ -1,11 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    token::{Mint, TokenAccount},
-    token_2022::{self, Token2022, TransferChecked},
-};
-use crate::errors::*;
-use crate::state::*;
-use crate::constants::*;
+use anchor_spl::token::{self, Mint, TokenAccount, Token, TransferChecked};
+use crate::{errors::*, state::*, constants::*};
 
 #[derive(Accounts)]
 pub struct Contribute<'info> {
@@ -14,7 +9,11 @@ pub struct Contribute<'info> {
 
     pub token_mint: Account<'info, Mint>,
 
-    #[account(mut, seeds = [SEED_POOL, pool.admin.as_ref()], bump)]
+    #[account(
+        mut,
+        seeds = [SEED_POOL, pool.admin.as_ref()],
+        bump
+    )]
     pub pool: Account<'info, RoscaPool>,
 
     #[account(
@@ -28,37 +27,56 @@ pub struct Contribute<'info> {
 
     #[account(
         mut,
-        seeds = [SEED_MEMBER, pool.key().as_ref(), payer.key().as_ref()],
+        seeds = [
+            SEED_MEMBER,
+            pool.key().as_ref(),
+            payer.key().as_ref()
+        ],
         bump,
         has_one = pool
     )]
     pub member_account: Account<'info, RoscaMember>,
 
-    #[account(mut, token::mint = token_mint, token::authority = payer)]
+    #[account(
+        mut,
+        token::mint = token_mint,
+        token::authority = payer
+    )]
     pub payer_ata: Account<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token2022>,
+    pub token_program: Program<'info, Token>,
 }
 
-pub fn handle(ctx: Context<Contribute>) -> Result<()> {
+pub fn contribute(ctx: Context<Contribute>) -> Result<()> {
     let pool = &mut ctx.accounts.pool;
     let member = &mut ctx.accounts.member_account;
 
     require!(pool.is_active, RoundPotError::PoolNotFull);
 
-    // Vérifie que le cycle attendu correspond
+    // timestamp
     let now = Clock::get()?.unix_timestamp;
-    let elapsed = now.saturating_sub(pool.start_timestamp);
-    let expected = (elapsed / pool.cycle_duration) as u8;
-    require!(expected == pool.current_cycle, RoundPotError::WrongCycleWindow);
 
-    // Empêche de payer deux fois le même cycle
+    // --- WINDOW : cycle courant ---
+    let cycle_start =
+        pool.start_timestamp + (pool.current_cycle as i64 * pool.cycle_duration);
+    let cycle_end = cycle_start + pool.cycle_duration;
+
+    msg!("--- CONTRIBUTION WINDOW CHECK ---");
+    msg!("now           = {}", now);
+    msg!("cycle_start   = {}", cycle_start);
+    msg!("cycle_end     = {}", cycle_end);
+    msg!("current_cycle = {}", pool.current_cycle);
+
+    require!(now >= cycle_start, RoundPotError::WrongCycleWindow);
+    require!(now < cycle_end, RoundPotError::WrongCycleWindow);
+
+    // --- déjà contribué ? ---
     require!(
         member.last_paid_cycle < pool.current_cycle as i8,
         RoundPotError::AlreadyContributed
     );
 
-    // ✅ Transfert via Token-2022
+    // --- CPI TRANSFER ---
     let cpi_accounts = TransferChecked {
         from: ctx.accounts.payer_ata.to_account_info(),
         mint: ctx.accounts.token_mint.to_account_info(),
@@ -67,17 +85,15 @@ pub fn handle(ctx: Context<Contribute>) -> Result<()> {
     };
     let cpi_ctx =
         CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
-    token_2022::transfer_checked(
+
+    token::transfer_checked(
         cpi_ctx,
         pool.contribution_amount,
         ctx.accounts.token_mint.decimals,
     )?;
 
-    // Mise à jour du membre
-    member.total_contributed = member
-        .total_contributed
-        .checked_add(pool.contribution_amount)
-        .unwrap();
+    // --- UPDATE STATE ---
+    member.total_contributed += pool.contribution_amount;
     member.last_paid_cycle = pool.current_cycle as i8;
 
     Ok(())

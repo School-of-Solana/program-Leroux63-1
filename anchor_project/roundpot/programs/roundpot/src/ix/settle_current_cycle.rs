@@ -1,19 +1,18 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    token::{Mint, TokenAccount},
-    token_2022::{self, Token2022, TransferChecked},
-};
-use crate::constants::*;
-use crate::errors::*;
-use crate::state::*;
+use anchor_spl::token::{self, Mint, TokenAccount, Token, TransferChecked};
+use crate::{errors::*, state::*, constants::*};
 
 #[derive(Accounts)]
-pub struct SettleCurrentCycle<'info> {
-    #[account(mut)]
+pub struct SettleCurrentCycle <'info> {
     pub caller: Signer<'info>,
+
     pub token_mint: Account<'info, Mint>,
 
-    #[account(mut, seeds = [SEED_POOL, pool.admin.as_ref()], bump)]
+    #[account(
+        mut,
+        seeds = [SEED_POOL, pool.admin.as_ref()],
+        bump
+    )]
     pub pool: Account<'info, RoscaPool>,
 
     #[account(
@@ -30,76 +29,82 @@ pub struct SettleCurrentCycle<'info> {
 
     #[account(
         mut,
-        seeds = [SEED_MEMBER, pool.key().as_ref(), recipient_wallet.key().as_ref()],
-        bump,
-        has_one = pool
+        seeds = [
+            SEED_MEMBER,
+            pool.key().as_ref(),
+            recipient_wallet.key().as_ref()
+        ],
+        bump
     )]
     pub recipient_member: Account<'info, RoscaMember>,
 
-    /// CHECK: used for seeds only
-    pub recipient_wallet: AccountInfo<'info>,
+    /// CHECK
+    pub recipient_wallet: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub recipient_ata: Account<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token2022>,
+    pub token_program: Program<'info, Token>,
 }
 
-pub fn handle(ctx: Context<SettleCurrentCycle>) -> Result<()> {
+pub fn settle_current_cycle(ctx: Context<SettleCurrentCycle>) -> Result<()> {
     let pool = &mut ctx.accounts.pool;
+    let recipient = &mut ctx.accounts.recipient_member;
+
     require!(pool.is_active, RoundPotError::PoolNotFull);
 
+    // TIME CHECK
     let now = Clock::get()?.unix_timestamp;
-    let cycle_end = pool.start_timestamp + ((pool.current_cycle as i64 + 1) * pool.cycle_duration);
-    require!(now >= cycle_end, RoundPotError::CycleNotFinished);
+    let required_finish =
+        (pool.current_cycle as i64 + 1) * pool.cycle_duration + pool.start_timestamp;
 
+    msg!("--- SETTLE WINDOW CHECK ---");
+    msg!("now            = {}", now);
+    msg!("required_finish= {}", required_finish);
+    msg!("current_cycle  = {}", pool.current_cycle);
+
+    require!(now >= required_finish, RoundPotError::CycleNotFinished);
+
+    // CORRECT WINNER
     require!(
-        ctx.accounts.recipient_member.position == pool.current_cycle,
+        recipient.position == pool.current_cycle,
         RoundPotError::InvalidRecipient
     );
 
-    for ai in ctx.remaining_accounts.iter() {
-        if let Ok(mut data) = ai.try_borrow_mut_data() {
-            if let Ok(mut member) = RoscaMember::try_deserialize_unchecked(&mut &data[..]) {
-                if member.pool == pool.key()
-                    && member.last_paid_cycle < pool.current_cycle as i8
-                {
-                    member.collateral_slashable = member
-                        .collateral_slashable
-                        .saturating_sub(pool.contribution_amount);
-                    let _ = member.try_serialize(&mut &mut data[..]);
-                }
-            }
-        }
-    }
+    // POT = total contributions of this cycle
+    let pot = pool.contribution_amount * pool.max_members as u64;
 
-    let pot = (pool.max_members as u64) * pool.contribution_amount;
-    let fee = pot * (FEE_BPS as u64) / 10_000;
-    let net = pot - fee;
+    // SIGNER SEEDS
+    let signer_seeds: &[&[u8]] = &[
+        SEED_POOL,
+        pool.admin.as_ref(),
+        &[ctx.bumps.pool]
+    ];
 
-    let seeds: &[&[u8]] = &[SEED_POOL, pool.admin.as_ref(), &[ctx.bumps.pool]];
-    let signer = &[&seeds[..]];
+    token::transfer_checked(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            TransferChecked {
+                from: ctx.accounts.pool_vault.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
+                to: ctx.accounts.recipient_ata.to_account_info(),
+                authority: pool.to_account_info(),
+            },
+            &[signer_seeds],
+        ),
+        pot,
+        ctx.accounts.token_mint.decimals,
+    )?;
 
-    for (amount, to) in [(fee, &ctx.accounts.treasury_ata), (net, &ctx.accounts.recipient_ata)] {
-        let cpi = TransferChecked {
-            from: ctx.accounts.pool_vault.to_account_info(),
-            mint: ctx.accounts.token_mint.to_account_info(),
-            to: to.to_account_info(),
-            authority: pool.to_account_info(),
-        };
-        let cpi_ctx =
-            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi, signer);
-
-        token_2022::transfer_checked(cpi_ctx, amount, ctx.accounts.token_mint.decimals)?;
-    }
-
-    let recipient_member = &mut ctx.accounts.recipient_member;
-    recipient_member.total_received += net;
-    recipient_member.has_received_payout = true;
+    // STATE UPDATE
+    recipient.total_received += pot;
+    recipient.has_received_payout = true;
 
     pool.current_cycle += 1;
+
     if pool.current_cycle == pool.max_members {
         pool.is_active = false;
     }
+
     Ok(())
 }

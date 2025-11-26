@@ -26,32 +26,32 @@ pub mod roundpot {
         max_members: u8,
         cycle_duration: i64,
     ) -> Result<()> {
-        ix::initialize_pool::handle(ctx, contribution_amount, max_members, cycle_duration)
+        ix::initialize_pool::initialize_pool(ctx, contribution_amount, max_members, cycle_duration)
     }
 
     /// Join an existing pool (deposit collateral)
     pub fn join_pool(ctx: Context<JoinPool>) -> Result<()> {
-        ix::join_pool::handle(ctx)
+        ix::join_pool::join_pool(ctx)
     }
 
     /// Activate a full pool (start first cycle)
     pub fn activate_pool(ctx: Context<ActivatePool>) -> Result<()> {
-        ix::activate_pool::handle(ctx)
+        ix::activate_pool::activate_pool(ctx)
     }
 
     /// Contribute to the current cycle
     pub fn contribute(ctx: Context<Contribute>) -> Result<()> {
-        ix::contribute::handle(ctx)
+        ix::contribute::contribute(ctx)
     }
 
     /// Settle and distribute the current cycle pot
     pub fn settle_current_cycle(ctx: Context<SettleCurrentCycle>) -> Result<()> {
-        ix::settle_current_cycle::handle(ctx)
+        ix::settle_current_cycle::settle_current_cycle(ctx)
     }
 
     /// Withdraw remaining collateral after completion
     pub fn withdraw_collateral(ctx: Context<WithdrawCollateral>) -> Result<()> {
-        ix::withdraw_collateral::handle(ctx)
+        ix::withdraw_collateral::withdraw_collateral(ctx)
     }
 }
 

@@ -16,7 +16,7 @@ pub struct ActivatePool<'info> {
     pub pool: Account<'info, RoscaPool>,
 }
 
-pub fn handle(ctx: Context<ActivatePool>) -> Result<()> {
+pub fn activate_pool(ctx: Context<ActivatePool>) -> Result<()> {
     let pool = &mut ctx.accounts.pool;
     require!(!pool.is_active, RoundPotError::PoolAlreadyActive);
     require!(pool.member_count == pool.max_members, RoundPotError::PoolNotFull);

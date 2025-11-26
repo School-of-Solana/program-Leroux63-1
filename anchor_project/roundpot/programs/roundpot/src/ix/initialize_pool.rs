@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use anchor_spl::token_interface::{Mint, TokenAccount};
+use anchor_spl::token::{Token};
 use crate::state::*;
 use crate::constants::*;
 
@@ -31,11 +32,11 @@ pub struct InitializePool<'info> {
     pub vault: InterfaceAccount<'info, TokenAccount>,
 
     pub system_program: Program<'info, System>,
-    pub token_program: Interface<'info, TokenInterface>,
+    pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handle(
+pub fn initialize_pool(
     ctx: Context<InitializePool>,
     contribution_amount: u64,
     max_members: u8,
