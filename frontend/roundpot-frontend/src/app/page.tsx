@@ -1,5 +1,12 @@
-import DashboardFeature from '@/features/dashboard/dashboard-feature'
+'use client'
 
-export default function Home() {
-  return <DashboardFeature />
+import DashboardFeature from '@/features/dashboard/dashboard-feature'
+import RoundpotActions from '@/features/roundpot/roundpot-actions'
+
+export default function Page() {
+  return (
+    <div className="space-y-10">
+      <RoundpotActions />
+    </div>
+  )
 }
