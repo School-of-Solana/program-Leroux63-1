@@ -177,3 +177,5 @@ This project was built specifically for the School of Solana final assignment an
 - No external services are required; all logic and state transitions happen entirely on-chain.
 
 The codebase was written from scratch for this assignment and significantly exceeds the minimal feature requirements by implementing a complete ROSCA mechanism with deterministic payout order, collateral tracking, and a treasury account for fee collection.
+
+https://roundpotsol.vercel.app

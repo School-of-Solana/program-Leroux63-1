@@ -23,7 +23,7 @@ Everything is wired to run **on Devnet**.
 
 ## 🌐 Live Frontend
 
-*(Add link if deployed)*
+https://roundpotsol.vercel.app
 
 ---
 
